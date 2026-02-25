@@ -1,0 +1,18 @@
+name = "cf-billing-monitor"
+main = "src/index.ts"
+compatibility_date = "2024-12-18"
+compatibility_flags = ["nodejs_compat"]
+
+[triggers]
+crons = ["0 21 * * *"]  # 毎日 21:00 UTC = 06:00 JST
+
+[[send_email]]
+name = "EMAIL"
+destination_address = "m.tama.ramu@gmail.com"
+
+[[kv_namespaces]]
+binding = "BILLING_HISTORY"
+id = "dbdf12475ec840b7925bb428d0bc8f16"
+
+[observability]
+enabled = true
