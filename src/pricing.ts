@@ -115,13 +115,17 @@ export function calculateKVCost(reads: number, writes: number, storageGB: number
 export function calculateContainersCost(
   vcpuSeconds: number,
   memoryGiBSeconds: number,
+  diskGBSeconds: number,
+  egressGB: number,
 ): ServiceCost {
   const cost =
     vcpuSeconds * PRICING.containers.costPerVCPUSecond +
-    memoryGiBSeconds * PRICING.containers.costPerGiBSecond;
+    memoryGiBSeconds * PRICING.containers.costPerGiBSecond +
+    diskGBSeconds * PRICING.containers.costPerGBDiskSecond +
+    egressGB * PRICING.containers.costPerGBEgress;
   return {
     service: "Containers",
-    usage: { vcpuSeconds, memoryGiBSeconds },
+    usage: { vcpuSeconds, memoryGiBSeconds, diskGBSeconds, egressGB },
     estimatedCost: cost,
     withinFree: false,
   };

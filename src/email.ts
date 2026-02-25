@@ -163,7 +163,7 @@ ${progressBar(mu.doRequests, FREE_DO_REQUESTS, "DO Req", `${fmtCompact(mu.doRequ
 </tr>
 <tr>
   <td ${S.td}>Containers</td>
-  <td ${S.tdR}>vCPU: ${fmt(current.containers.vcpuSeconds)}s / Mem: ${fmt(current.containers.memoryGiBSeconds)} GiB-s</td>
+  <td ${S.tdR}>CPU: ${current.containers.vcpuSeconds.toFixed(1)}s / Mem: ${fmtCompact(current.containers.memoryGiBSeconds)} GiB-s / Disk: ${fmtCompact(current.containers.diskGBSeconds ?? 0)} GB-s / Egress: ${(current.containers.egressGB ?? 0).toFixed(3)} GB</td>
   <td ${S.tdR}>${costCell(current.estimatedCosts.containers)}</td>
 </tr>
 <tr>

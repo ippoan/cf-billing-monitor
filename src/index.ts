@@ -1,6 +1,6 @@
 // cf-billing-monitor — Cloudflare 使用量日次レポート Worker
 import { EmailMessage } from "cloudflare:email";
-import { fetchWorkersMetrics, fetchR2Metrics, fetchDOMetrics, fetchAccountUsageSummary } from "./graphql";
+import { fetchWorkersMetrics, fetchR2Metrics, fetchDOMetrics, fetchContainersMetrics, fetchAccountUsageSummary } from "./graphql";
 import { fetchBillingHistory } from "./billing";
 import {
   calculateWorkersCost,
@@ -55,10 +55,11 @@ async function runReport(env: Env): Promise<void> {
   console.log(`Fetching metrics for ${dateStr}`);
 
   // 並列でデータ取得
-  const [workerMetrics, r2Metrics, doMetrics, billingHistory, billingPeriodUsage] = await Promise.all([
+  const [workerMetrics, r2Metrics, doMetrics, containersMetrics, billingHistory, billingPeriodUsage] = await Promise.all([
     fetchWorkersMetrics(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, startDate, endDate),
     fetchR2Metrics(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, startDate, endDate),
     fetchDOMetrics(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, startDate, endDate),
+    fetchContainersMetrics(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, startDate, endDate),
     fetchBillingHistory(env.CF_API_TOKEN, env.CF_ACCOUNT_ID),
     fetchAccountUsageSummary(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, billingStartDate, endDate),
   ]);
@@ -86,9 +87,12 @@ async function runReport(env: Env): Promise<void> {
     (doMetrics.wallTimeMs / 1000) * 0.000128, // 概算: 128MB DO → GB-seconds
     doMetrics.storageBytes / (1024 * 1024 * 1024),
   );
-  // Containers: GraphQL では直接取得できないため、Billing API のデータから推定
-  // 暫定: 0 として記録（Billing History に含まれる）
-  const containersCost = calculateContainersCost(0, 0);
+  const containersCost = calculateContainersCost(
+    containersMetrics.cpuSeconds,
+    containersMetrics.memoryGiBSeconds,
+    containersMetrics.diskGBSeconds,
+    containersMetrics.egressGB,
+  );
 
   const dailyUsage: DailyUsage = {
     date: dateStr,
@@ -103,7 +107,12 @@ async function runReport(env: Env): Promise<void> {
       durationGBs: (doMetrics.wallTimeMs / 1000) * 0.000128,
       storageGB: doMetrics.storageBytes / (1024 * 1024 * 1024),
     },
-    containers: { vcpuSeconds: 0, memoryGiBSeconds: 0 },
+    containers: {
+      vcpuSeconds: containersMetrics.cpuSeconds,
+      memoryGiBSeconds: containersMetrics.memoryGiBSeconds,
+      diskGBSeconds: containersMetrics.diskGBSeconds,
+      egressGB: containersMetrics.egressGB,
+    },
     estimatedCosts: {
       workers: workersCost.estimatedCost,
       r2: r2Cost.estimatedCost,

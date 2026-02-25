@@ -232,6 +232,83 @@ export async function fetchR2Metrics(
   };
 }
 
+export interface ContainersMetrics {
+  cpuSeconds: number;
+  memoryGiBSeconds: number;
+  diskGBSeconds: number;
+  egressGB: number;
+}
+
+export async function fetchContainersMetrics(
+  token: string,
+  accountId: string,
+  startDate: string,
+  endDate: string,
+): Promise<ContainersMetrics> {
+  // active 別に集計: active=1（稼働中）のみが課金対象
+  const query = `
+    query ContainersMetrics($accountTag: string!, $startDate: Date!, $endDate: Date!) {
+      viewer {
+        accounts(filter: { accountTag: $accountTag }) {
+          containersMetricsAdaptiveGroups(
+            limit: 10
+            filter: {
+              date_geq: $startDate
+              date_leq: $endDate
+            }
+          ) {
+            sum {
+              cpuTimeSec
+              allocatedMemory
+              allocatedDisk
+              txBytes
+            }
+            dimensions {
+              active
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const dateStart = startDate.split("T")[0];
+  const dateEnd = endDate.split("T")[0];
+
+  const data = (await queryGraphQL(token, query, {
+    accountTag: accountId,
+    startDate: dateStart,
+    endDate: dateEnd,
+  })) as {
+    data?: {
+      viewer?: {
+        accounts?: Array<{
+          containersMetricsAdaptiveGroups?: Array<{
+            sum: { cpuTimeSec: number; allocatedMemory: number; allocatedDisk: number; txBytes: number };
+            dimensions: { active: number };
+          }>;
+        }>;
+      };
+    };
+  };
+
+  const groups = data?.data?.viewer?.accounts?.[0]?.containersMetricsAdaptiveGroups ?? [];
+
+  // active=1 のデータのみ使用（課金対象）、なければ 0
+  const activeGroup = groups.find((g) => g.dimensions.active === 1);
+  if (!activeGroup) {
+    return { cpuSeconds: 0, memoryGiBSeconds: 0, diskGBSeconds: 0, egressGB: 0 };
+  }
+
+  const s = activeGroup.sum;
+  return {
+    cpuSeconds: s.cpuTimeSec,
+    memoryGiBSeconds: s.allocatedMemory / (1024 ** 3),  // byte-seconds → GiB-seconds
+    diskGBSeconds: s.allocatedDisk / (10 ** 9),          // byte-seconds → GB-seconds
+    egressGB: s.txBytes / (10 ** 9),                     // bytes → GB
+  };
+}
+
 export async function fetchDOMetrics(
   token: string,
   accountId: string,

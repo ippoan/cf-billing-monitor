@@ -5,7 +5,7 @@ export interface DailyUsage {
   workers: { totalRequests: number; totalErrors: number; totalCpuMs: number };
   r2: { storageGB: number; classAOps: number; classBOps: number };
   durableObjects: { requests: number; durationGBs: number; storageGB: number };
-  containers: { vcpuSeconds: number; memoryGiBSeconds: number };
+  containers: { vcpuSeconds: number; memoryGiBSeconds: number; diskGBSeconds: number; egressGB: number };
   estimatedCosts: {
     workers: number;
     r2: number;
