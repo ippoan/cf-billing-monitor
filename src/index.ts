@@ -2,11 +2,13 @@
 import { EmailMessage } from "cloudflare:email";
 import { fetchWorkersMetrics, fetchR2Metrics, fetchDOMetrics, fetchContainersMetrics, fetchAccountUsageSummary } from "./graphql";
 import { fetchBillingHistory } from "./billing";
+import { fetchSupabaseUsage } from "./supabase";
 import {
   calculateWorkersCost,
   calculateR2Cost,
   calculateDOCost,
   calculateContainersCost,
+  calculateSupabaseCost,
 } from "./pricing";
 import { saveDaily, getPrevious, compare, getMonthToDateCosts, getMonthToDateUsage, type DailyUsage } from "./storage";
 import { buildEmail } from "./email";
@@ -14,6 +16,7 @@ import { buildEmail } from "./email";
 export interface Env {
   CF_API_TOKEN: string;
   CF_ACCOUNT_ID: string;
+  SUPABASE_PAT: string;
   BILLING_HISTORY: KVNamespace;
   EMAIL: SendEmail;
 }
@@ -55,13 +58,14 @@ async function runReport(env: Env): Promise<void> {
   console.log(`Fetching metrics for ${dateStr}`);
 
   // 並列でデータ取得
-  const [workerMetrics, r2Metrics, doMetrics, containersMetrics, billingHistory, billingPeriodUsage] = await Promise.all([
+  const [workerMetrics, r2Metrics, doMetrics, containersMetrics, billingHistory, billingPeriodUsage, supabaseUsage] = await Promise.all([
     fetchWorkersMetrics(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, startDate, endDate),
     fetchR2Metrics(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, startDate, endDate),
     fetchDOMetrics(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, startDate, endDate),
     fetchContainersMetrics(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, startDate, endDate),
     fetchBillingHistory(env.CF_API_TOKEN, env.CF_ACCOUNT_ID),
     fetchAccountUsageSummary(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, billingStartDate, endDate),
+    fetchSupabaseUsage(env.SUPABASE_PAT),
   ]);
 
   // Workers 集計
@@ -94,6 +98,15 @@ async function runReport(env: Env): Promise<void> {
     containersMetrics.egressGB,
   );
 
+  // Supabase コスト（月額固定を日割り）
+  const supabaseCost = supabaseUsage
+    ? calculateSupabaseCost(supabaseUsage.dbSizeMB / 1024, supabaseUsage.computeCost)
+    : null;
+  const daysInMonth = new Date(
+    yesterday.getUTCFullYear(), yesterday.getUTCMonth() + 1, 0,
+  ).getDate();
+  const supabaseDailyCost = supabaseCost ? supabaseCost.estimatedCost / daysInMonth : 0;
+
   const dailyUsage: DailyUsage = {
     date: dateStr,
     workers: { totalRequests, totalErrors, totalCpuMs },
@@ -113,12 +126,14 @@ async function runReport(env: Env): Promise<void> {
       diskGBSeconds: containersMetrics.diskGBSeconds,
       egressGB: containersMetrics.egressGB,
     },
+    supabase: supabaseUsage ? { dbSizeMB: supabaseUsage.dbSizeMB } : undefined,
     estimatedCosts: {
       workers: workersCost.estimatedCost,
       r2: r2Cost.estimatedCost,
       durableObjects: doCost.estimatedCost,
       containers: containersCost.estimatedCost,
-      total: workersCost.estimatedCost + r2Cost.estimatedCost + doCost.estimatedCost + containersCost.estimatedCost,
+      supabase: supabaseDailyCost,
+      total: workersCost.estimatedCost + r2Cost.estimatedCost + doCost.estimatedCost + containersCost.estimatedCost + supabaseDailyCost,
     },
   };
 
@@ -142,6 +157,7 @@ async function runReport(env: Env): Promise<void> {
     monthToDateUsage,
     billingPeriodUsage,
     billingHistory,
+    supabaseUsage,
   });
 
   console.log(`Sending email: ${subject}`);

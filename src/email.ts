@@ -3,15 +3,17 @@ import { createMimeMessage } from "mimetext";
 import type { Comparison, MonthToDateUsage } from "./storage";
 import type { WorkerMetrics, AccountUsageSummary } from "./graphql";
 import type { BillingEntry } from "./billing";
+import type { SupabaseUsage } from "./supabase";
 
 interface EmailData {
   date: string;
   workerMetrics: WorkerMetrics[];
   comparison: Comparison;
-  monthToDate: { workers: number; r2: number; durableObjects: number; containers: number; total: number };
+  monthToDate: { workers: number; r2: number; durableObjects: number; containers: number; supabase: number; total: number };
   monthToDateUsage: MonthToDateUsage;
   billingPeriodUsage: AccountUsageSummary;
   billingHistory: BillingEntry[];
+  supabaseUsage: SupabaseUsage | null;
 }
 
 function fmt(n: number): string {
@@ -83,7 +85,7 @@ function progressBar(used: number, free: number, label: string, valueStr: string
 }
 
 function buildHtmlBody(data: EmailData): string {
-  const { date, workerMetrics, comparison, monthToDate, monthToDateUsage, billingPeriodUsage, billingHistory } = data;
+  const { date, workerMetrics, comparison, monthToDate, monthToDateUsage, billingPeriodUsage, billingHistory, supabaseUsage } = data;
   const { current, changes, alerts } = comparison;
 
   const sorted = [...workerMetrics].sort((a, b) => b.requests - a.requests);
@@ -110,6 +112,7 @@ ${progressBar(bp.totalCpuTimeMs, FREE_CPU_MS, "CPU Time(推定)", `${fmtCompact(
 ${progressBar(mu.r2ClassAOps, FREE_R2_CLASS_A, "R2 Class A", `${fmtCompact(mu.r2ClassAOps)} / ${fmtCompact(FREE_R2_CLASS_A)}`)}
 ${progressBar(mu.r2ClassBOps, FREE_R2_CLASS_B, "R2 Class B", `${fmtCompact(mu.r2ClassBOps)} / ${fmtCompact(FREE_R2_CLASS_B)}`)}
 ${progressBar(mu.doRequests, FREE_DO_REQUESTS, "DO Req", `${fmtCompact(mu.doRequests)} / ${fmtCompact(FREE_DO_REQUESTS)}`)}
+${supabaseUsage ? progressBar(supabaseUsage.dbSizeMB, supabaseUsage.dbLimitMB, "Supabase DB", `${supabaseUsage.dbSizeMB.toFixed(0)} MB / ${(supabaseUsage.dbLimitMB / 1024).toFixed(0)} GB`) : ""}
 </table>`;
 
   // --- Workers テーブル ---
@@ -176,6 +179,11 @@ ${progressBar(mu.doRequests, FREE_DO_REQUESTS, "DO Req", `${fmtCompact(mu.doRequ
   <td ${S.tdR}>${fmt(current.durableObjects.requests)} req / ${current.durableObjects.durationGBs.toFixed(1)} GB-s / ${current.durableObjects.storageGB.toFixed(3)} GB</td>
   <td ${S.tdR}>${costCell(current.estimatedCosts.durableObjects)}</td>
 </tr>
+${supabaseUsage ? `<tr>
+  <td ${S.td}>Supabase (Pro)</td>
+  <td ${S.tdR}>DB: ${supabaseUsage.dbSizeMB.toFixed(0)} MB / ${(supabaseUsage.dbLimitMB / 1024).toFixed(0)} GB | Compute: Micro</td>
+  <td ${S.tdR}><span style="font-weight:600">$${supabaseUsage.planCost.toFixed(2)}/月</span></td>
+</tr>` : ""}
 </table>`;
 
   // --- 月間累計 ---
@@ -189,6 +197,10 @@ ${progressBar(mu.doRequests, FREE_DO_REQUESTS, "DO Req", `${fmtCompact(mu.doRequ
 <tr>
   <td>R2</td><td style="text-align:right;font-weight:600">${fmtCost(monthToDate.r2)}</td>
   <td style="padding-left:16px">DO</td><td style="text-align:right;font-weight:600">${fmtCost(monthToDate.durableObjects)}</td>
+</tr>
+<tr>
+  <td>Supabase</td><td style="text-align:right;font-weight:600">${fmtCost(monthToDate.supabase)}</td>
+  <td colspan="2"></td>
 </tr>
 <tr style="border-top:1px solid #ffe082">
   <td colspan="3" style="font-weight:700;padding-top:4px">合計</td>

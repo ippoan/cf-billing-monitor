@@ -41,6 +41,12 @@ export const PRICING = {
     costPerGBDiskSecond: 0.00000007,
     costPerGBEgress: 0.05,
   },
+  supabase: {
+    proBaseCost: 25.00,        // $25/月
+    computeCredits: 10.00,     // $10/月（Pro 付属）
+    dbIncludedGB: 8,           // 8 GB 含む
+    dbOveragePerGB: 0.125,     // $0.125/GB（超過分）
+  },
 } as const;
 
 export interface ServiceCost {
@@ -109,6 +115,19 @@ export function calculateKVCost(reads: number, writes: number, storageGB: number
     usage: { reads, writes, storageGB },
     estimatedCost: cost,
     withinFree: cost === 0,
+  };
+}
+
+export function calculateSupabaseCost(dbSizeGB: number, computeMonthlyCost: number): ServiceCost {
+  const dbOverageGB = Math.max(0, dbSizeGB - PRICING.supabase.dbIncludedGB);
+  const dbOverageCost = dbOverageGB * PRICING.supabase.dbOveragePerGB;
+  const netComputeCost = Math.max(0, computeMonthlyCost - PRICING.supabase.computeCredits);
+  const totalMonthlyCost = PRICING.supabase.proBaseCost + dbOverageCost + netComputeCost;
+  return {
+    service: "Supabase",
+    usage: { dbSizeGB, computeMonthlyCost },
+    estimatedCost: totalMonthlyCost,
+    withinFree: false, // Pro は常に $25
   };
 }
 

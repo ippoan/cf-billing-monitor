@@ -6,11 +6,13 @@ export interface DailyUsage {
   r2: { storageGB: number; classAOps: number; classBOps: number };
   durableObjects: { requests: number; durationGBs: number; storageGB: number };
   containers: { vcpuSeconds: number; memoryGiBSeconds: number; diskGBSeconds: number; egressGB: number };
+  supabase?: { dbSizeMB: number };
   estimatedCosts: {
     workers: number;
     r2: number;
     durableObjects: number;
     containers: number;
+    supabase?: number;
     total: number;
   };
 }
@@ -56,6 +58,10 @@ export function compare(current: DailyUsage, previous: DailyUsage | null): Compa
       { key: "DO Requests", curr: current.durableObjects.requests, prev: previous.durableObjects.requests },
       { key: "Containers vCPU", curr: current.containers.vcpuSeconds, prev: previous.containers.vcpuSeconds },
     ];
+
+    if (current.supabase && previous.supabase) {
+      metrics.push({ key: "Supabase DB Size", curr: current.supabase.dbSizeMB, prev: previous.supabase.dbSizeMB });
+    }
 
     for (const m of metrics) {
       const pct = changePercent(m.curr, m.prev);
@@ -122,13 +128,14 @@ export async function getMonthToDateCosts(kv: KVNamespace, currentDate: string):
   r2: number;
   durableObjects: number;
   containers: number;
+  supabase: number;
   total: number;
 }> {
   const date = new Date(currentDate + "T00:00:00Z");
   const year = date.getUTCFullYear();
   const month = date.getUTCMonth();
 
-  let workers = 0, r2 = 0, durableObjects = 0, containers = 0;
+  let workers = 0, r2 = 0, durableObjects = 0, containers = 0, supabase = 0;
 
   for (let day = 1; day <= date.getUTCDate(); day++) {
     const d = new Date(Date.UTC(year, month, day));
@@ -140,8 +147,9 @@ export async function getMonthToDateCosts(kv: KVNamespace, currentDate: string):
       r2 += usage.estimatedCosts.r2;
       durableObjects += usage.estimatedCosts.durableObjects;
       containers += usage.estimatedCosts.containers;
+      supabase += usage.estimatedCosts.supabase ?? 0;
     }
   }
 
-  return { workers, r2, durableObjects, containers, total: workers + r2 + durableObjects + containers };
+  return { workers, r2, durableObjects, containers, supabase, total: workers + r2 + durableObjects + containers + supabase };
 }
