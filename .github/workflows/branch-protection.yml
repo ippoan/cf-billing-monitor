@@ -1,0 +1,34 @@
+name: branch-protection
+
+# ci-workflows の reusable `branch-protection.yml` を caller として呼ぶ。
+# `push: main` のたびに main の protection を declarative に上書きする
+# (protection 有効化 + auto-merge / delete-branch-on-merge + bypass 無し
+# ruleset の作成)。frontend-ci 内蔵の "Branch Protection Check" が要求する
+# repo hardening をこの workflow が満たす。
+#
+# 要 secret: `TAG_RELEASE_PAT` (fine-grained PAT で対象 repo の
+# "Administration: write" + "Contents: read" 権限を持つもの)。
+# `GITHUB_TOKEN` の `administration` scope は存在しないため代用不可。
+# 詳細は ci-workflows/branch-protection.yml の header コメント参照。
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    uses: ippoan/ci-workflows/.github/workflows/branch-protection.yml@main
+    secrets:
+      TAG_RELEASE_PAT: ${{ secrets.TAG_RELEASE_PAT }}
+    with:
+      branch: main
+      # この repo で常時走る check のみ pin する。
+      # Vitest / Integration は has_tests=false / has_integration=false で
+      # skip されるため required に入れない (= 永久に satisfied しない check に
+      # ならないようにする)。
+      required_checks: |
+        ci / Type Check
+        ci / PR Limit Check
