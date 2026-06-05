@@ -2,6 +2,12 @@ name = "cf-billing-monitor"
 main = "src/index.ts"
 compatibility_date = "2024-12-18"
 compatibility_flags = ["nodejs_compat"]
+# account_id を明示して wrangler の `/memberships` 経由のアカウント自動判別を
+# skip する。CI の CLOUDFLARE_API_TOKEN は Workers Scripts:Edit のみの
+# account-scoped token で、user-level の membership read 権限が無いため、
+# 未指定だと deploy 時に `/memberships` で Authentication error [code: 10000]
+# になる。非機密の account 識別子 (org 共通の CF_ACCOUNT_ID と同値)。
+account_id = "24b45709d060d957340180e995f0d373"
 
 [triggers]
 crons = ["0 21 * * *"]  # 毎日 21:00 UTC = 06:00 JST
