@@ -14,9 +14,11 @@ import { saveDaily, getPrevious, compare, getMonthToDateCosts, getMonthToDateUsa
 import { buildEmail } from "./email";
 
 export interface Env {
-  CF_API_TOKEN: string;
+  // CF Secrets Store bindings — plain string ではなく async `.get()` を持つ。
+  CF_API_TOKEN: SecretsStoreSecret;
+  SUPABASE_PAT: SecretsStoreSecret;
+  // 非機密の account 識別子は plain vars binding (string)。
   CF_ACCOUNT_ID: string;
-  SUPABASE_PAT: string;
   BILLING_HISTORY: KVNamespace;
   EMAIL: SendEmail;
 }
@@ -57,15 +59,19 @@ async function runReport(env: Env): Promise<void> {
 
   console.log(`Fetching metrics for ${dateStr}`);
 
+  // CF Secrets Store binding は plain string ではないので async .get() で取り出す。
+  const cfApiToken = await env.CF_API_TOKEN.get();
+  const supabasePat = await env.SUPABASE_PAT.get();
+
   // 並列でデータ取得
   const [workerMetrics, r2Metrics, doMetrics, containersMetrics, billingHistory, billingPeriodUsage, supabaseUsage] = await Promise.all([
-    fetchWorkersMetrics(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, startDateTime, endDateTime),
-    fetchR2Metrics(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, startDate, endDate),
-    fetchDOMetrics(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, startDateTime, endDateTime),
-    fetchContainersMetrics(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, startDate, endDate),
-    fetchBillingHistory(env.CF_API_TOKEN, env.CF_ACCOUNT_ID),
-    fetchAccountUsageSummary(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, billingStartDate, endDateTime),
-    fetchSupabaseUsage(env.SUPABASE_PAT),
+    fetchWorkersMetrics(cfApiToken, env.CF_ACCOUNT_ID, startDateTime, endDateTime),
+    fetchR2Metrics(cfApiToken, env.CF_ACCOUNT_ID, startDate, endDate),
+    fetchDOMetrics(cfApiToken, env.CF_ACCOUNT_ID, startDateTime, endDateTime),
+    fetchContainersMetrics(cfApiToken, env.CF_ACCOUNT_ID, startDate, endDate),
+    fetchBillingHistory(cfApiToken, env.CF_ACCOUNT_ID),
+    fetchAccountUsageSummary(cfApiToken, env.CF_ACCOUNT_ID, billingStartDate, endDateTime),
+    fetchSupabaseUsage(supabasePat),
   ]);
 
   // Workers 集計

@@ -9,6 +9,12 @@ compatibility_flags = ["nodejs_compat"]
 # になる。非機密の account 識別子 (org 共通の CF_ACCOUNT_ID と同値)。
 account_id = "24b45709d060d957340180e995f0d373"
 
+# runtime binding。worker code が env.CF_ACCOUNT_ID で読む CF account 識別子。
+# 非機密 (org 共通) なので Secrets Store ではなく plain vars に置く (org 規約:
+# secrets-inventory / cf-access-mcp / ci-dashboard 等と同じ)。
+[vars]
+CF_ACCOUNT_ID = "24b45709d060d957340180e995f0d373"
+
 [triggers]
 crons = ["0 21 * * *"]  # 毎日 21:00 UTC = 06:00 JST
 
@@ -23,10 +29,16 @@ id = "dbdf12475ec840b7925bb428d0bc8f16"
 [observability]
 enabled = true
 
-# secret-verify (ci-workflows) 用の明示宣言。この Worker は GCP Secret Manager に
-# backup すべき secret を持たない (CF_API_TOKEN / SUPABASE_PAT は `wrangler secret
-# put` で投入する再生成可能な read-only token)。空 `[]` で「監査対象 secret なし」を
-# 明示する。非空にすると wrangler 4.79+ が worker-scoped secret と誤解釈するため、
-# 監査対象を増やす場合は値を GCP 側にも投入した上で列挙すること。
-[secrets]
-required = []
+# CF Secrets Store binding (org 共通 store_id)。値は GCP Secret Manager (source
+# of truth) にも同名で存在し、secret-verify-gcp.yml が secret_name を自動抽出して
+# GCP backup を CI で検証する (= [secrets].required の明示は不要になる)。
+# worker code は plain string ではなく `await env.X.get()` で値を取り出す。
+[[secrets_store_secrets]]
+binding = "CF_API_TOKEN"
+store_id = "bd7bc91a3e5f4111add4acf6cb4b8733"
+secret_name = "cf-billing-monitor-cf-api-token"
+
+[[secrets_store_secrets]]
+binding = "SUPABASE_PAT"
+store_id = "bd7bc91a3e5f4111add4acf6cb4b8733"
+secret_name = "cf-billing-monitor-supabase-pat"
