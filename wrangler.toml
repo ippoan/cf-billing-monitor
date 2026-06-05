@@ -16,3 +16,11 @@ id = "dbdf12475ec840b7925bb428d0bc8f16"
 
 [observability]
 enabled = true
+
+# secret-verify (ci-workflows) 用の明示宣言。この Worker は GCP Secret Manager に
+# backup すべき secret を持たない (CF_API_TOKEN / SUPABASE_PAT は `wrangler secret
+# put` で投入する再生成可能な read-only token)。空 `[]` で「監査対象 secret なし」を
+# 明示する。非空にすると wrangler 4.79+ が worker-scoped secret と誤解釈するため、
+# 監査対象を増やす場合は値を GCP 側にも投入した上で列挙すること。
+[secrets]
+required = []
