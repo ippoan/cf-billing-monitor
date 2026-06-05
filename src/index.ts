@@ -43,28 +43,28 @@ export default {
 
 async function runReport(env: Env): Promise<void> {
   const now = new Date();
-  // 昨日の日付範囲 (UTC)
-  const yesterday = new Date(now);
-  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-  const dateStr = yesterday.toISOString().split("T")[0];
-  const startDate = `${dateStr}T00:00:00Z`;
+  const JST = 9 * 60 * 60 * 1000;
+  const nowJst = new Date(now.getTime() + JST);
+  const jstTodayMidUTC = Date.UTC(nowJst.getUTCFullYear(), nowJst.getUTCMonth(), nowJst.getUTCDate()) - JST;
+  const startMs = jstTodayMidUTC - 24 * 60 * 60 * 1000; // JST昨日 0:00
+  const endMs = jstTodayMidUTC - 1000;                  // JST昨日 23:59:59
+  const dateStr = new Date(startMs + JST).toISOString().split("T")[0];            // 件名/表示 = JST昨日
+  const startDateTime = new Date(startMs).toISOString().replace(/\.\d{3}Z$/, "Z"); // datetime系用
+  const endDateTime = new Date(endMs).toISOString().replace(/\.\d{3}Z$/, "Z");
+  const startDate = `${dateStr}T00:00:00Z`; // date系用(内部でsplitされJST昨日になる)
   const endDate = `${dateStr}T23:59:59Z`;
-
-  // 請求期間（過去30日）の開始日
-  const billingStart = new Date(yesterday);
-  billingStart.setUTCDate(billingStart.getUTCDate() - 29);
-  const billingStartDate = `${billingStart.toISOString().split("T")[0]}T00:00:00Z`;
+  const billingStartDate = new Date(startMs - 29 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
 
   console.log(`Fetching metrics for ${dateStr}`);
 
   // 並列でデータ取得
   const [workerMetrics, r2Metrics, doMetrics, containersMetrics, billingHistory, billingPeriodUsage, supabaseUsage] = await Promise.all([
-    fetchWorkersMetrics(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, startDate, endDate),
+    fetchWorkersMetrics(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, startDateTime, endDateTime),
     fetchR2Metrics(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, startDate, endDate),
-    fetchDOMetrics(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, startDate, endDate),
+    fetchDOMetrics(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, startDateTime, endDateTime),
     fetchContainersMetrics(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, startDate, endDate),
     fetchBillingHistory(env.CF_API_TOKEN, env.CF_ACCOUNT_ID),
-    fetchAccountUsageSummary(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, billingStartDate, endDate),
+    fetchAccountUsageSummary(env.CF_API_TOKEN, env.CF_ACCOUNT_ID, billingStartDate, endDateTime),
     fetchSupabaseUsage(env.SUPABASE_PAT),
   ]);
 
@@ -102,9 +102,8 @@ async function runReport(env: Env): Promise<void> {
   const supabaseCost = supabaseUsage
     ? calculateSupabaseCost(supabaseUsage.dbSizeMB / 1024, supabaseUsage.computeCost)
     : null;
-  const daysInMonth = new Date(
-    yesterday.getUTCFullYear(), yesterday.getUTCMonth() + 1, 0,
-  ).getDate();
+  const [dy, dm] = dateStr.split("-").map(Number);
+  const daysInMonth = new Date(dy, dm, 0).getDate();
   const supabaseDailyCost = supabaseCost ? supabaseCost.estimatedCost / daysInMonth : 0;
 
   const dailyUsage: DailyUsage = {
