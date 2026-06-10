@@ -63,8 +63,11 @@ export function buildFlickrHtmlBody(stats: FlickrStats): string {
         `<tr><td ${S.td}>${fmtDate(d.date)}</td><td ${S.tdR}>${fmt(d.files)}</td><td ${S.tdR}>${fmt(d.uploaded)}</td><td ${S.tdR}>${fmt(d.verified)}</td></tr>`,
     )
     .join("");
-  const oldest = stats.oldest_unuploaded_date
-    ? ` (最古: <b>${fmtDate(stats.oldest_unuploaded_date)}</b> — 古い順に消化中)`
+  // 消化位置 = 窓内で最古の「未完了」日。stats.oldest_unuploaded_date (全期間の
+  // min) は SD から消えた回収不能分 (2025 年など) を指してしまうため使わない
+  const inWindowOldest = [...stats.days].reverse().find((d) => d.uploaded < d.files);
+  const oldest = inWindowOldest
+    ? ` (消化位置: <b>${fmtDate(inWindowOldest.date)}</b> — 古い順に処理中)`
     : "";
   return `
 <div ${S.summary}>
