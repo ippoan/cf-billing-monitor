@@ -13,6 +13,8 @@ export interface FlickrStats {
   days: DayStat[];
   total_unuploaded: number;
   total_unverified: number;
+  /** 最古の未アップロード撮影日 (YYYYMMDD)。日々進む = backfill が SD ローテーションに勝っている */
+  oldest_unuploaded_date?: string | null;
 }
 
 export interface FlickrReportEnv {
@@ -59,9 +61,12 @@ export function buildFlickrHtmlBody(stats: FlickrStats): string {
         `<tr><td ${S.td}>${fmtDate(d.date)}</td><td ${S.tdR}>${fmt(d.files)}</td><td ${S.tdR}>${fmt(d.uploaded)}</td><td ${S.tdR}>${fmt(d.verified)}</td></tr>`,
     )
     .join("");
+  const oldest = stats.oldest_unuploaded_date
+    ? ` (最古: <b>${fmtDate(stats.oldest_unuploaded_date)}</b> — 古い順に消化中)`
+    : "";
   return `
 <div ${S.summary}>
-  未アップロード残: <b>${fmt(stats.total_unuploaded)}</b> / 未検証残: <b>${fmt(stats.total_unverified)}</b>
+  未アップロード残: <b>${fmt(stats.total_unuploaded)}</b>${oldest} / 未検証残: <b>${fmt(stats.total_unverified)}</b>
 </div>
 <table ${S.table}>
   <tr><th ${S.th}>撮影日</th><th ${S.thR}>登録</th><th ${S.thR}>Flickr済</th><th ${S.thR}>検証済</th></tr>
