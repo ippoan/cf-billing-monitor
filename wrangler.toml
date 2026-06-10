@@ -14,6 +14,9 @@ account_id = "24b45709d060d957340180e995f0d373"
 # secrets-inventory / cf-access-mcp / ci-dashboard 等と同じ)。
 [vars]
 CF_ACCOUNT_ID = "24b45709d060d957340180e995f0d373"
+# Flickr 日次レポート (rust-flickr GET /stats、Refs #4)
+RUST_FLICKR_URL = "https://rust-flickr-staging-747065218280.asia-northeast1.run.app"
+FLICKR_REPORT_ORG = "536859de-d43e-4932-9d16-f60cac8fa426"
 
 [triggers]
 crons = ["0 21 * * *"]  # 毎日 21:00 UTC = 06:00 JST

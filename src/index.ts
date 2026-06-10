@@ -12,6 +12,7 @@ import {
 } from "./pricing";
 import { saveDaily, getPrevious, compare, getMonthToDateCosts, getMonthToDateUsage, type DailyUsage } from "./storage";
 import { buildEmail } from "./email";
+import { buildFlickrEmail, fetchFlickrStats } from "./flickr-report";
 
 export interface Env {
   // CF Secrets Store bindings — plain string ではなく async `.get()` を持つ。
@@ -21,14 +22,23 @@ export interface Env {
   CF_ACCOUNT_ID: string;
   BILLING_HISTORY: KVNamespace;
   EMAIL: SendEmail;
+  // Flickr 日次レポート (rust-flickr GET /stats、Refs #4)
+  RUST_FLICKR_URL: string;
+  FLICKR_REPORT_ORG: string;
 }
 
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext) {
+    // billing / flickr は独立に送る (片方の失敗で他方を巻き込まない)
     try {
       await runReport(env);
     } catch (err) {
       console.error("Report failed:", err);
+    }
+    try {
+      await runFlickrReport(env);
+    } catch (err) {
+      console.error("Flickr report failed:", err);
     }
   },
 
@@ -39,9 +49,30 @@ export default {
       ctx.waitUntil(runReport(env));
       return new Response("Report triggered");
     }
+    if (url.pathname === "/trigger-flickr") {
+      ctx.waitUntil(
+        runFlickrReport(env).catch((err) => console.error("Flickr report failed:", err)),
+      );
+      return new Response("Flickr report triggered");
+    }
     return new Response("cf-billing-monitor OK");
   },
 };
+
+async function runFlickrReport(env: Env): Promise<void> {
+  const stats = await fetchFlickrStats(env);
+  const nowJst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const dateStr = nowJst.toISOString().split("T")[0];
+  const { subject, raw } = buildFlickrEmail(stats, dateStr);
+  console.log(`Sending flickr report: ${subject}`);
+  const emailMessage = new EmailMessage(
+    "flickr-report@mtamaramu.com",
+    "m.tama.ramu@gmail.com",
+    raw,
+  );
+  await env.EMAIL.send(emailMessage);
+  console.log("Flickr report sent successfully");
+}
 
 async function runReport(env: Env): Promise<void> {
   const now = new Date();
