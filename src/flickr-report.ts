@@ -24,7 +24,9 @@ export interface FlickrReportEnv {
 
 export async function fetchFlickrStats(env: FlickrReportEnv): Promise<FlickrStats> {
   const base = env.RUST_FLICKR_URL.replace(/\/+$/, "");
-  const res = await fetch(`${base}/stats?days=7`, {
+  // backfill 消化中も全体が見えるよう 20 日窓 (日常運用でも uploaded 0 の日が
+  // 見える = 止まった日に気付ける)
+  const res = await fetch(`${base}/stats?days=20`, {
     headers: { "x-organization-id": env.FLICKR_REPORT_ORG },
   });
   if (!res.ok) {
