@@ -9,7 +9,7 @@ interface EmailData {
   date: string;
   workerMetrics: WorkerMetrics[];
   comparison: Comparison;
-  monthToDate: { workers: number; r2: number; durableObjects: number; containers: number; supabase: number; total: number };
+  monthToDate: { workers: number; r2: number; durableObjects: number; containers: number; queues: number; supabase: number; total: number };
   monthToDateUsage: MonthToDateUsage;
   billingPeriodUsage: AccountUsageSummary;
   billingHistory: BillingEntry[];
@@ -102,6 +102,7 @@ function buildHtmlBody(data: EmailData): string {
   const FREE_R2_CLASS_A = 1_000_000;
   const FREE_R2_CLASS_B = 10_000_000;
   const FREE_DO_REQUESTS = 1_000_000;
+  const FREE_QUEUES_OPS = 1_000_000;
   const bp = billingPeriodUsage;
   const mu = monthToDateUsage;
 
@@ -112,6 +113,7 @@ ${progressBar(bp.totalCpuTimeMs, FREE_CPU_MS, "CPU Time(推定)", `${fmtCompact(
 ${progressBar(mu.r2ClassAOps, FREE_R2_CLASS_A, "R2 Class A", `${fmtCompact(mu.r2ClassAOps)} / ${fmtCompact(FREE_R2_CLASS_A)}`)}
 ${progressBar(mu.r2ClassBOps, FREE_R2_CLASS_B, "R2 Class B", `${fmtCompact(mu.r2ClassBOps)} / ${fmtCompact(FREE_R2_CLASS_B)}`)}
 ${progressBar(mu.doRequests, FREE_DO_REQUESTS, "DO Req", `${fmtCompact(mu.doRequests)} / ${fmtCompact(FREE_DO_REQUESTS)}`)}
+${progressBar(mu.queuesOps, FREE_QUEUES_OPS, "Queues Ops", `${fmtCompact(mu.queuesOps)} / ${fmtCompact(FREE_QUEUES_OPS)}`)}
 ${supabaseUsage ? progressBar(supabaseUsage.dbSizeMB, supabaseUsage.dbLimitMB, "Supabase DB", `${supabaseUsage.dbSizeMB.toFixed(0)} MB / ${(supabaseUsage.dbLimitMB / 1024).toFixed(0)} GB`) : ""}
 </table>`;
 
@@ -179,6 +181,11 @@ ${supabaseUsage ? progressBar(supabaseUsage.dbSizeMB, supabaseUsage.dbLimitMB, "
   <td ${S.tdR}>${fmt(current.durableObjects.requests)} req / ${current.durableObjects.durationGBs.toFixed(1)} GB-s / ${current.durableObjects.storageGB.toFixed(3)} GB</td>
   <td ${S.tdR}>${costCell(current.estimatedCosts.durableObjects)}</td>
 </tr>
+${current.queues ? `<tr>
+  <td ${S.td}>Queues</td>
+  <td ${S.tdR}>${fmt(current.queues.operations)} ops (W: ${fmt(current.queues.writeOps)} / R: ${fmt(current.queues.readOps)} / D: ${fmt(current.queues.deleteOps)})</td>
+  <td ${S.tdR}>${costCell(current.estimatedCosts.queues ?? 0)}</td>
+</tr>` : ""}
 ${supabaseUsage ? `<tr>
   <td ${S.td}>Supabase (Pro)</td>
   <td ${S.tdR}>DB: ${supabaseUsage.dbSizeMB.toFixed(0)} MB / ${(supabaseUsage.dbLimitMB / 1024).toFixed(0)} GB | Compute: Micro</td>
@@ -200,7 +207,7 @@ ${supabaseUsage ? `<tr>
 </tr>
 <tr>
   <td>Supabase</td><td style="text-align:right;font-weight:600">${fmtCost(monthToDate.supabase)}</td>
-  <td colspan="2"></td>
+  <td style="padding-left:16px">Queues</td><td style="text-align:right;font-weight:600">${fmtCost(monthToDate.queues)}</td>
 </tr>
 <tr style="border-top:1px solid #ffe082">
   <td colspan="3" style="font-weight:700;padding-top:4px">合計</td>

@@ -41,6 +41,13 @@ export const PRICING = {
     costPerGBDiskSecond: 0.00000007,
     costPerGBEgress: 0.05,
   },
+  queues: {
+    // https://developers.cloudflare.com/queues/platform/pricing/
+    // operation = 64KB 単位の write / read / delete (1 message ≈ 3 ops)。
+    // egress / 保管は無課金。
+    freeOperations: 1_000_000,   // 1M ops/月 (Workers Paid)
+    costPerMillionOps: 0.40,
+  },
   supabase: {
     proBaseCost: 25.00,        // $25/月
     computeCredits: 10.00,     // $10/月（Pro 付属）
@@ -97,6 +104,17 @@ export function calculateDOCost(requests: number, durationGBs: number, storageGB
   return {
     service: "Durable Objects",
     usage: { requests, durationGBs, storageGB },
+    estimatedCost: cost,
+    withinFree: cost === 0,
+  };
+}
+
+export function calculateQueuesCost(operations: number): ServiceCost {
+  const overage = Math.max(0, operations - PRICING.queues.freeOperations);
+  const cost = (overage / 1_000_000) * PRICING.queues.costPerMillionOps;
+  return {
+    service: "Queues",
+    usage: { operations },
     estimatedCost: cost,
     withinFree: cost === 0,
   };

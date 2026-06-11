@@ -388,3 +388,76 @@ export async function fetchDOMetrics(
     storageBytes: storage[0]?.max?.storedBytes ?? 0,
   };
 }
+
+export interface QueuesMetrics {
+  /** billable operations (write + read + delete、64KB 単位)。課金の元数字。 */
+  operations: number;
+  writeOps: number;
+  readOps: number;
+  deleteOps: number;
+}
+
+// Queues の operation 数 (Refs #10)。queueMessageOperationsAdaptiveGroups の
+// sum.billableOperations が課金単位 (writes/reads/deletes、64KB chunk ごと)。
+// actionType 別に取り、内訳もメールに出す。
+export async function fetchQueuesMetrics(
+  token: string,
+  accountId: string,
+  startDate: string,
+  endDate: string,
+): Promise<QueuesMetrics> {
+  const query = `
+    query QueuesMetrics($accountTag: string!, $startDate: Date!, $endDate: Date!) {
+      viewer {
+        accounts(filter: { accountTag: $accountTag }) {
+          queueMessageOperationsAdaptiveGroups(
+            limit: 10
+            filter: {
+              date_geq: $startDate
+              date_leq: $endDate
+            }
+          ) {
+            sum {
+              billableOperations
+            }
+            dimensions {
+              actionType
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const dateStart = startDate.split("T")[0];
+  const dateEnd = endDate.split("T")[0];
+
+  const data = (await queryGraphQL(token, query, {
+    accountTag: accountId,
+    startDate: dateStart,
+    endDate: dateEnd,
+  })) as {
+    data?: {
+      viewer?: {
+        accounts?: Array<{
+          queueMessageOperationsAdaptiveGroups?: Array<{
+            sum: { billableOperations: number };
+            dimensions: { actionType: string };
+          }>;
+        }>;
+      };
+    };
+  };
+
+  const groups = data?.data?.viewer?.accounts?.[0]?.queueMessageOperationsAdaptiveGroups ?? [];
+  let writeOps = 0;
+  let readOps = 0;
+  let deleteOps = 0;
+  for (const g of groups) {
+    const ops = g.sum.billableOperations;
+    if (g.dimensions.actionType === "WriteMessage") writeOps += ops;
+    else if (g.dimensions.actionType === "ReadMessage") readOps += ops;
+    else if (g.dimensions.actionType === "DeleteMessage") deleteOps += ops;
+  }
+  return { operations: writeOps + readOps + deleteOps, writeOps, readOps, deleteOps };
+}

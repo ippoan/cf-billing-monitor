@@ -1,6 +1,6 @@
 // cf-billing-monitor — Cloudflare 使用量日次レポート Worker
 import { EmailMessage } from "cloudflare:email";
-import { fetchWorkersMetrics, fetchR2Metrics, fetchDOMetrics, fetchContainersMetrics, fetchAccountUsageSummary } from "./graphql";
+import { fetchWorkersMetrics, fetchR2Metrics, fetchDOMetrics, fetchContainersMetrics, fetchQueuesMetrics, fetchAccountUsageSummary } from "./graphql";
 import { fetchBillingHistory } from "./billing";
 import { fetchSupabaseUsage } from "./supabase";
 import {
@@ -8,6 +8,7 @@ import {
   calculateR2Cost,
   calculateDOCost,
   calculateContainersCost,
+  calculateQueuesCost,
   calculateSupabaseCost,
 } from "./pricing";
 import { saveDaily, getPrevious, compare, getMonthToDateCosts, getMonthToDateUsage, type DailyUsage } from "./storage";
@@ -95,11 +96,12 @@ async function runReport(env: Env): Promise<void> {
   const supabasePat = await env.SUPABASE_PAT.get();
 
   // 並列でデータ取得
-  const [workerMetrics, r2Metrics, doMetrics, containersMetrics, billingHistory, billingPeriodUsage, supabaseUsage] = await Promise.all([
+  const [workerMetrics, r2Metrics, doMetrics, containersMetrics, queuesMetrics, billingHistory, billingPeriodUsage, supabaseUsage] = await Promise.all([
     fetchWorkersMetrics(cfApiToken, env.CF_ACCOUNT_ID, startDateTime, endDateTime),
     fetchR2Metrics(cfApiToken, env.CF_ACCOUNT_ID, startDate, endDate),
     fetchDOMetrics(cfApiToken, env.CF_ACCOUNT_ID, startDateTime, endDateTime),
     fetchContainersMetrics(cfApiToken, env.CF_ACCOUNT_ID, startDate, endDate),
+    fetchQueuesMetrics(cfApiToken, env.CF_ACCOUNT_ID, startDate, endDate),
     fetchBillingHistory(cfApiToken, env.CF_ACCOUNT_ID),
     fetchAccountUsageSummary(cfApiToken, env.CF_ACCOUNT_ID, billingStartDate, endDateTime),
     fetchSupabaseUsage(supabasePat),
@@ -134,6 +136,7 @@ async function runReport(env: Env): Promise<void> {
     containersMetrics.diskGBSeconds,
     containersMetrics.egressGB,
   );
+  const queuesCost = calculateQueuesCost(queuesMetrics.operations);
 
   // Supabase コスト（月額固定を日割り）
   const supabaseCost = supabaseUsage
@@ -162,14 +165,16 @@ async function runReport(env: Env): Promise<void> {
       diskGBSeconds: containersMetrics.diskGBSeconds,
       egressGB: containersMetrics.egressGB,
     },
+    queues: queuesMetrics,
     supabase: supabaseUsage ? { dbSizeMB: supabaseUsage.dbSizeMB } : undefined,
     estimatedCosts: {
       workers: workersCost.estimatedCost,
       r2: r2Cost.estimatedCost,
       durableObjects: doCost.estimatedCost,
       containers: containersCost.estimatedCost,
+      queues: queuesCost.estimatedCost,
       supabase: supabaseDailyCost,
-      total: workersCost.estimatedCost + r2Cost.estimatedCost + doCost.estimatedCost + containersCost.estimatedCost + supabaseDailyCost,
+      total: workersCost.estimatedCost + r2Cost.estimatedCost + doCost.estimatedCost + containersCost.estimatedCost + queuesCost.estimatedCost + supabaseDailyCost,
     },
   };
 

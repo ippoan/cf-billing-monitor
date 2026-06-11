@@ -6,12 +6,15 @@ export interface DailyUsage {
   r2: { storageGB: number; classAOps: number; classBOps: number };
   durableObjects: { requests: number; durationGBs: number; storageGB: number };
   containers: { vcpuSeconds: number; memoryGiBSeconds: number; diskGBSeconds: number; egressGB: number };
+  // Queues は 2026-06 追加 (Refs #10)。過去の KV entry には無いので optional。
+  queues?: { operations: number; writeOps: number; readOps: number; deleteOps: number };
   supabase?: { dbSizeMB: number };
   estimatedCosts: {
     workers: number;
     r2: number;
     durableObjects: number;
     containers: number;
+    queues?: number;
     supabase?: number;
     total: number;
   };
@@ -59,6 +62,10 @@ export function compare(current: DailyUsage, previous: DailyUsage | null): Compa
       { key: "Containers vCPU", curr: current.containers.vcpuSeconds, prev: previous.containers.vcpuSeconds },
     ];
 
+    if (current.queues && previous.queues) {
+      metrics.push({ key: "Queues Ops", curr: current.queues.operations, prev: previous.queues.operations });
+    }
+
     if (current.supabase && previous.supabase) {
       metrics.push({ key: "Supabase DB Size", curr: current.supabase.dbSizeMB, prev: previous.supabase.dbSizeMB });
     }
@@ -94,6 +101,7 @@ export interface MonthToDateUsage {
   r2ClassAOps: number;
   r2ClassBOps: number;
   doRequests: number;
+  queuesOps: number;
   daysCollected: number;
 }
 
@@ -102,7 +110,7 @@ export async function getMonthToDateUsage(kv: KVNamespace, currentDate: string):
   const year = date.getUTCFullYear();
   const month = date.getUTCMonth();
 
-  let totalRequests = 0, totalCpuMs = 0, r2ClassAOps = 0, r2ClassBOps = 0, doRequests = 0, daysCollected = 0;
+  let totalRequests = 0, totalCpuMs = 0, r2ClassAOps = 0, r2ClassBOps = 0, doRequests = 0, queuesOps = 0, daysCollected = 0;
 
   for (let day = 1; day <= date.getUTCDate(); day++) {
     const d = new Date(Date.UTC(year, month, day));
@@ -115,11 +123,12 @@ export async function getMonthToDateUsage(kv: KVNamespace, currentDate: string):
       r2ClassAOps += usage.r2.classAOps;
       r2ClassBOps += usage.r2.classBOps;
       doRequests += usage.durableObjects.requests;
+      queuesOps += usage.queues?.operations ?? 0;
       daysCollected++;
     }
   }
 
-  return { totalRequests, totalCpuMs, r2ClassAOps, r2ClassBOps, doRequests, daysCollected };
+  return { totalRequests, totalCpuMs, r2ClassAOps, r2ClassBOps, doRequests, queuesOps, daysCollected };
 }
 
 // 月初から今日までの累計推定コスト
@@ -128,6 +137,7 @@ export async function getMonthToDateCosts(kv: KVNamespace, currentDate: string):
   r2: number;
   durableObjects: number;
   containers: number;
+  queues: number;
   supabase: number;
   total: number;
 }> {
@@ -135,7 +145,7 @@ export async function getMonthToDateCosts(kv: KVNamespace, currentDate: string):
   const year = date.getUTCFullYear();
   const month = date.getUTCMonth();
 
-  let workers = 0, r2 = 0, durableObjects = 0, containers = 0, supabase = 0;
+  let workers = 0, r2 = 0, durableObjects = 0, containers = 0, queues = 0, supabase = 0;
 
   for (let day = 1; day <= date.getUTCDate(); day++) {
     const d = new Date(Date.UTC(year, month, day));
@@ -147,9 +157,10 @@ export async function getMonthToDateCosts(kv: KVNamespace, currentDate: string):
       r2 += usage.estimatedCosts.r2;
       durableObjects += usage.estimatedCosts.durableObjects;
       containers += usage.estimatedCosts.containers;
+      queues += usage.estimatedCosts.queues ?? 0;
       supabase += usage.estimatedCosts.supabase ?? 0;
     }
   }
 
-  return { workers, r2, durableObjects, containers, supabase, total: workers + r2 + durableObjects + containers + supabase };
+  return { workers, r2, durableObjects, containers, queues, supabase, total: workers + r2 + durableObjects + containers + queues + supabase };
 }
