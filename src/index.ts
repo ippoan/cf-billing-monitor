@@ -1,4 +1,5 @@
 // cf-billing-monitor — Cloudflare 使用量日次レポート Worker
+import { WorkerEntrypoint } from "cloudflare:workers";
 import { EmailMessage } from "cloudflare:email";
 import { fetchWorkersMetrics, fetchR2Metrics, fetchDOMetrics, fetchContainersMetrics, fetchQueuesMetrics, fetchAccountUsageSummary } from "./graphql";
 import { fetchBillingHistory } from "./billing";
@@ -28,37 +29,38 @@ export interface Env {
   FLICKR_REPORT_ORG: string;
 }
 
-export default {
-  async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext) {
+export default class CfBillingMonitor extends WorkerEntrypoint<Env> {
+  async scheduled(_event: ScheduledEvent) {
     // billing / flickr は独立に送る (片方の失敗で他方を巻き込まない)
     try {
-      await runReport(env);
+      await runReport(this.env);
     } catch (err) {
       console.error("Report failed:", err);
     }
     try {
-      await runFlickrReport(env);
+      await runFlickrReport(this.env);
     } catch (err) {
       console.error("Flickr report failed:", err);
     }
-  },
+  }
 
-  // fetch handler for manual trigger / health check
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  // Flickr レポートの手動トリガーは RPC method に集約。service binding を持つ
+  // Worker からのみ到達でき、外部 HTTP からは叩けない (= 旧 /trigger-flickr を秘匿)。
+  async triggerFlickrReport(): Promise<void> {
+    await runFlickrReport(this.env);
+  }
+
+  // 外部公開 HTTP は billing の手動トリガーと health のみ。flickr の手動トリガーは
+  // RPC (triggerFlickrReport) に移したため、外部から flickr メール送信を発火できない。
+  async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/trigger") {
-      ctx.waitUntil(runReport(env));
+      this.ctx.waitUntil(runReport(this.env));
       return new Response("Report triggered");
     }
-    if (url.pathname === "/trigger-flickr") {
-      ctx.waitUntil(
-        runFlickrReport(env).catch((err) => console.error("Flickr report failed:", err)),
-      );
-      return new Response("Flickr report triggered");
-    }
     return new Response("cf-billing-monitor OK");
-  },
-};
+  }
+}
 
 async function runFlickrReport(env: Env): Promise<void> {
   const stats = await fetchFlickrStats(env);
