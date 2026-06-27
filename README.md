@@ -15,9 +15,18 @@
 
 ## 手動実行
 
+billing は公開 HTTP パスから手動実行できる:
+
 ```sh
 curl https://cf-billing-monitor.m-tama-ramu.workers.dev/trigger          # billing
-curl https://cf-billing-monitor.m-tama-ramu.workers.dev/trigger-flickr  # flickr
+```
+
+flickr レポートは**外部公開していない**。手動トリガーは service binding 経由の
+RPC method `triggerFlickrReport()` に集約してあり、外部 HTTP からはメール送信を
+発火できない (cron による日次配信は従来どおり)。binding を持つ別 Worker から:
+
+```ts
+await env.CF_BILLING_MONITOR.triggerFlickrReport();
 ```
 
 ## 構成
