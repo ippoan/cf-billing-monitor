@@ -15,11 +15,14 @@ import {
 import { saveDaily, getPrevious, compare, getMonthToDateCosts, getMonthToDateUsage, type DailyUsage } from "./storage";
 import { buildEmail } from "./email";
 import { buildFlickrEmail, fetchFlickrStats } from "./flickr-report";
+import { buildGhCacheReportEmail, validateGhCacheReport, type GhCacheReportPayload } from "./gh-cache-report";
 
 export interface Env {
   // CF Secrets Store bindings — plain string ではなく async `.get()` を持つ。
   CF_API_TOKEN: SecretsStoreSecret;
   SUPABASE_PAT: SecretsStoreSecret;
+  // GitHub Actions cache 日次レポートの POST 認証 (Refs #16)
+  GH_CACHE_REPORT_SECRET: SecretsStoreSecret;
   // 非機密の account 識別子は plain vars binding (string)。
   CF_ACCOUNT_ID: string;
   BILLING_HISTORY: KVNamespace;
@@ -58,8 +61,51 @@ export default class CfBillingMonitor extends WorkerEntrypoint<Env> {
       this.ctx.waitUntil(runReport(this.env));
       return new Response("Report triggered");
     }
+    // GitHub Actions cache 使用量レポート受け口 (Refs #16)。集計は送信側
+    // (rust-alc-api の cache-size-report.yml) が行い、ここは検証 + メール化のみ。
+    // 認証は X-Report-Secret の shared secret (fail-closed: binding 未設定なら 503)。
+    if (url.pathname === "/gh-cache-report" && request.method === "POST") {
+      return handleGhCacheReport(this.env, request);
+    }
     return new Response("cf-billing-monitor OK");
   }
+}
+
+async function handleGhCacheReport(env: Env, request: Request): Promise<Response> {
+  const secret = await env.GH_CACHE_REPORT_SECRET?.get?.().catch(() => null);
+  if (!secret) {
+    console.error("gh-cache-report: GH_CACHE_REPORT_SECRET binding missing/empty");
+    return new Response("not configured", { status: 503 });
+  }
+  const given = request.headers.get("X-Report-Secret") ?? "";
+  const enc = new TextEncoder();
+  const a = enc.encode(given);
+  const b = enc.encode(secret);
+  // timingSafeEqual は同長のみ受けるため長さ不一致は先に弾く (長さ leak は許容)
+  if (a.byteLength !== b.byteLength || !crypto.subtle.timingSafeEqual(a, b)) {
+    return new Response("unauthorized", { status: 401 });
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return new Response("invalid JSON", { status: 400 });
+  }
+  const invalid = validateGhCacheReport(body);
+  if (invalid) {
+    return new Response(invalid, { status: 400 });
+  }
+  const payload = body as GhCacheReportPayload;
+  const { subject, raw } = buildGhCacheReportEmail(payload);
+  console.log(`Sending gh-cache report: ${subject}`);
+  const emailMessage = new EmailMessage(
+    "gh-cache-report@mtamaramu.com",
+    "m.tama.ramu@gmail.com",
+    raw,
+  );
+  await env.EMAIL.send(emailMessage);
+  return new Response("sent");
 }
 
 async function runFlickrReport(env: Env): Promise<void> {

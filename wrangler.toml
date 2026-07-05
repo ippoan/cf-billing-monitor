@@ -45,3 +45,11 @@ secret_name = "cf-billing-monitor-cf-api-token"
 binding = "SUPABASE_PAT"
 store_id = "bd7bc91a3e5f4111add4acf6cb4b8733"
 secret_name = "cf-billing-monitor-supabase-pat"
+
+# GitHub Actions cache 日次レポート (POST /gh-cache-report) の shared secret。
+# 送信側 (ippoan/rust-alc-api の cache-size-report.yml) が GitHub org secret の
+# 同名値を X-Report-Secret ヘッダで送る (Refs #16)。
+[[secrets_store_secrets]]
+binding = "GH_CACHE_REPORT_SECRET"
+store_id = "bd7bc91a3e5f4111add4acf6cb4b8733"
+secret_name = "GH_CACHE_REPORT_SECRET"
