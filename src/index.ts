@@ -14,7 +14,7 @@ import {
 } from "./pricing";
 import { saveDaily, getPrevious, compare, getMonthToDateCosts, getMonthToDateUsage, type DailyUsage } from "./storage";
 import { buildEmail } from "./email";
-import { buildFlickrEmail, fetchFlickrStats } from "./flickr-report";
+import { buildFlickrEmail, buildFlickrFailureEmail, fetchFlickrStats, type FlickrCamService } from "./flickr-report";
 import { buildGhCacheReportEmail, validateGhCacheReport, type GhCacheReportPayload } from "./gh-cache-report";
 
 export interface Env {
@@ -27,9 +27,9 @@ export interface Env {
   CF_ACCOUNT_ID: string;
   BILLING_HISTORY: KVNamespace;
   EMAIL: SendEmail;
-  // Flickr 日次レポート (rust-flickr GET /stats、Refs #4)
-  RUST_FLICKR_URL: string;
-  FLICKR_REPORT_ORG: string;
+  // Flickr 日次レポートの供給元。cf-flickr-cam-worker の named entrypoint
+  // `ReportEntrypoint` への service binding (公開 URL は持たない、Refs #18)。
+  FLICKR_CAM: FlickrCamService;
 }
 
 export default class CfBillingMonitor extends WorkerEntrypoint<Env> {
@@ -109,15 +109,24 @@ async function handleGhCacheReport(env: Env, request: Request): Promise<Response
 }
 
 async function runFlickrReport(env: Env): Promise<void> {
-  const stats = await fetchFlickrStats(env);
   const nowJst = new Date(Date.now() + 9 * 60 * 60 * 1000);
   const dateStr = nowJst.toISOString().split("T")[0];
-  const { subject, raw } = buildFlickrEmail(stats, dateStr);
-  console.log(`Sending flickr report: ${subject}`);
+
+  // 集計の取得に失敗しても「無音で止まる」を避ける — 失敗を件名に出した 1 通を
+  // 必ず送る (2026-07-08 の供給元廃止に 6 週間気付けなかった、Refs #18)。
+  let mail: { subject: string; raw: string };
+  try {
+    mail = buildFlickrEmail(await fetchFlickrStats(env), dateStr);
+  } catch (err) {
+    console.error("Flickr stats fetch failed:", err);
+    mail = buildFlickrFailureEmail(dateStr, err);
+  }
+
+  console.log(`Sending flickr report: ${mail.subject}`);
   const emailMessage = new EmailMessage(
     "flickr-report@mtamaramu.com",
     "m.tama.ramu@gmail.com",
-    raw,
+    mail.raw,
   );
   await env.EMAIL.send(emailMessage);
   console.log("Flickr report sent successfully");
