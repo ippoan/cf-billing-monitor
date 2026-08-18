@@ -14,9 +14,16 @@ account_id = "24b45709d060d957340180e995f0d373"
 # secrets-inventory / cf-access-mcp / ci-dashboard 等と同じ)。
 [vars]
 CF_ACCOUNT_ID = "24b45709d060d957340180e995f0d373"
-# Flickr 日次レポート (rust-flickr GET /stats、Refs #4)
-RUST_FLICKR_URL = "https://rust-flickr-staging-747065218280.asia-northeast1.run.app"
-FLICKR_REPORT_ORG = "536859de-d43e-4932-9d16-f60cac8fa426"
+
+# Flickr 日次レポートの供給元 (Refs #18)。cf-flickr-cam-worker は
+# workers_dev:false で公開 URL を持たず、集計は non-default export の named
+# WorkerEntrypoint に生えている (org 標準: claude-skills
+# knowledge/standards/ops/cloudflare-binding-only-rpc.md) ため、`entrypoint` を
+# 明示して binding する。旧供給元の rust-flickr (Cloud Run) は 2026-07-08 廃止。
+[[services]]
+binding = "FLICKR_CAM"
+service = "cf-flickr-cam-worker"
+entrypoint = "ReportEntrypoint"
 
 [triggers]
 crons = ["0 21 * * *"]  # 毎日 21:00 UTC = 06:00 JST

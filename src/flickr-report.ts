@@ -1,38 +1,43 @@
-// Flickr パイプライン日次レポート — rust-flickr GET /stats を消費して
-// 撮影日別の登録/upload/検証と残数をメール化する。Refs #4
+// Flickr パイプライン日次レポート — cf-flickr-cam-worker の binding-only RPC
+// (`ReportEntrypoint.dailyStats`) を消費して撮影日別の登録/upload と残数を
+// メール化する。Refs #4, #18
+//
+// 供給元は 2026-07-08 まで rust-flickr (Cloud Run) の `GET /stats` だったが、
+// カメラ→Flickr パイプラインが ippoan/cf-flickr-cam-worker へ移行して Cloud Run
+// が廃止されたため RPC に付け替えた (旧 URL は Google フロントの 404 を返し、
+// レポートが無音で止まっていた)。新パイプラインには verify 相当の工程が無いので
+// 旧レポートの「検証済 / 未検証残」は無い。
 import { createMimeMessage } from "mimetext";
 
+/** 1 撮影日ぶんの登録/アップロード件数 (cf-flickr-cam-worker `src/stats.ts` と同形)。 */
 export interface DayStat {
   date: string;
   files: number;
   uploaded: number;
-  verified: number;
 }
 
 export interface FlickrStats {
+  /** 撮影日の新しい順。 */
   days: DayStat[];
-  total_unuploaded: number;
-  total_unverified: number;
-  /** 最古の未アップロード撮影日 (YYYYMMDD)。日々進む = backfill が SD ローテーションに勝っている */
-  oldest_unuploaded_date?: string | null;
+  /** cam worker の D1 に残っている未アップロード件数 (= 次の cron が拾う残作業)。 */
+  pending: number;
+}
+
+/** cf-flickr-cam-worker の named entrypoint (`ReportEntrypoint`) への service binding。 */
+export interface FlickrCamService {
+  dailyStats(days: number): Promise<FlickrStats>;
 }
 
 export interface FlickrReportEnv {
-  RUST_FLICKR_URL: string;
-  FLICKR_REPORT_ORG: string;
+  FLICKR_CAM: FlickrCamService;
 }
 
+/** backfill 消化中も全体が見えるよう 20 日窓 (uploaded 0 の日が見える = 止まった
+ * 日に気付ける)。 */
+export const FLICKR_REPORT_DAYS = 20;
+
 export async function fetchFlickrStats(env: FlickrReportEnv): Promise<FlickrStats> {
-  const base = env.RUST_FLICKR_URL.replace(/\/+$/, "");
-  // backfill 消化中も全体が見えるよう 20 日窓 (日常運用でも uploaded 0 の日が
-  // 見える = 止まった日に気付ける)
-  const res = await fetch(`${base}/stats?days=20`, {
-    headers: { "x-organization-id": env.FLICKR_REPORT_ORG },
-  });
-  if (!res.ok) {
-    throw new Error(`flickr stats fetch failed: ${res.status}`);
-  }
-  return (await res.json()) as FlickrStats;
+  return await env.FLICKR_CAM.dailyStats(FLICKR_REPORT_DAYS);
 }
 
 function fmt(n: number): string {
@@ -54,29 +59,45 @@ const S = {
   tdR: 'style="text-align:right;padding:5px 10px;border-bottom:1px solid #eee;font-variant-numeric:tabular-nums;white-space:nowrap"',
   summary:
     'style="background:#e3f2fd;border:1px solid #90caf9;border-radius:6px;padding:12px 16px;margin:12px 0;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px"',
+  alert:
+    'style="background:#ffebee;border:1px solid #ef9a9a;border-radius:6px;padding:12px 16px;margin:12px 0;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px"',
 };
+
+/** 窓内で「登録 > Flickr済」の日の取り残し合計。cam worker が日次アーカイブを
+ * 打った後に残った分 = 放っておくと上がらない (pending と違い cron は拾わない)。 */
+export function windowShortfall(stats: FlickrStats): number {
+  return stats.days.reduce((sum, d) => sum + Math.max(0, d.files - d.uploaded), 0);
+}
 
 export function buildFlickrHtmlBody(stats: FlickrStats): string {
   const rows = stats.days
     .map(
       (d) =>
-        `<tr><td ${S.td}>${fmtDate(d.date)}</td><td ${S.tdR}>${fmt(d.files)}</td><td ${S.tdR}>${fmt(d.uploaded)}</td><td ${S.tdR}>${fmt(d.verified)}</td></tr>`,
+        `<tr><td ${S.td}>${fmtDate(d.date)}</td><td ${S.tdR}>${fmt(d.files)}</td><td ${S.tdR}>${fmt(d.uploaded)}</td></tr>`,
     )
     .join("");
-  // 消化位置 = 窓内で最古の「未完了」日。stats.oldest_unuploaded_date (全期間の
-  // min) は SD から消えた回収不能分 (2025 年など) を指してしまうため使わない
+  // 消化位置 = 窓内で最古の「未完了」日 (古い順に処理するため)
   const inWindowOldest = [...stats.days].reverse().find((d) => d.uploaded < d.files);
   const oldest = inWindowOldest
     ? ` (消化位置: <b>${fmtDate(inWindowOldest.date)}</b> — 古い順に処理中)`
     : "";
   return `
 <div ${S.summary}>
-  未アップロード残: <b>${fmt(stats.total_unuploaded)}</b>${oldest} / 未検証残: <b>${fmt(stats.total_unverified)}</b>
+  処理待ち: <b>${fmt(stats.pending)}</b>${oldest} / 窓内の取り残し: <b>${fmt(windowShortfall(stats))}</b>
 </div>
 <table ${S.table}>
-  <tr><th ${S.th}>撮影日</th><th ${S.thR}>登録</th><th ${S.thR}>Flickr済</th><th ${S.thR}>検証済</th></tr>
+  <tr><th ${S.th}>撮影日</th><th ${S.thR}>登録</th><th ${S.thR}>Flickr済</th></tr>
   ${rows}
 </table>`;
+}
+
+function flickrMail(subject: string, html: string): { subject: string; raw: string } {
+  const msg = createMimeMessage();
+  msg.setSender({ name: "Flickr Report", addr: "flickr-report@mtamaramu.com" });
+  msg.setRecipient("m.tama.ramu@gmail.com");
+  msg.setSubject(subject);
+  msg.addMessage({ contentType: "text/html", data: html });
+  return { subject, raw: msg.asRaw() };
 }
 
 export function buildFlickrEmail(
@@ -87,16 +108,26 @@ export function buildFlickrEmail(
   const headline = latest
     ? `${fmtDate(latest.date)}: ${fmt(latest.files)} files`
     : "no data";
-  const subject = `[Flickr] ${dateStr} ${headline} / 残 ${fmt(stats.total_unuploaded)}`;
+  const subject = `[Flickr] ${dateStr} ${headline} / 残 ${fmt(stats.pending)}`;
+  return flickrMail(subject, buildFlickrHtmlBody(stats));
+}
 
-  const msg = createMimeMessage();
-  msg.setSender({ name: "Flickr Report", addr: "flickr-report@mtamaramu.com" });
-  msg.setRecipient("m.tama.ramu@gmail.com");
-  msg.setSubject(subject);
-  msg.addMessage({
-    contentType: "text/html",
-    data: buildFlickrHtmlBody(stats),
-  });
-
-  return { subject, raw: msg.asRaw() };
+/**
+ * 集計の取得自体に失敗したときのメール。以前は握り潰して**無音**で止まって
+ * いた (2026-07-08〜08-18 の 6 週間、誰も気付かなかった) ため、失敗も必ず 1 通
+ * 出す。Refs #18
+ */
+export function buildFlickrFailureEmail(
+  dateStr: string,
+  error: unknown,
+): { subject: string; raw: string } {
+  const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  const escaped = detail.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c] as string);
+  return flickrMail(
+    `[Flickr] ${dateStr} 取得失敗 ⚠️`,
+    `<div ${S.alert}>
+  cf-flickr-cam-worker (<code>ReportEntrypoint.dailyStats</code>) から集計を取得できませんでした。
+  <br><br><code>${escaped}</code>
+</div>`,
+  );
 }

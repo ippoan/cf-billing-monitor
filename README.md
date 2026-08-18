@@ -9,9 +9,16 @@
 | 件名 | 内容 | ソース |
 |---|---|---|
 | `[CF Billing] YYYY-MM-DD 使用量レポート` | Workers / R2 / DO / Containers / Supabase の使用量・概算コスト・前日比・月累計 | CF GraphQL Analytics + Billing API + Supabase API |
-| `[Flickr] YYYY-MM-DD …` | カメラ→Flickr パイプラインの撮影日別 (20 日窓) 登録/アップロード/検証と残数・消化位置 | [ippoan/rust-flickr](https://github.com/ippoan/rust-flickr) `GET /stats` (Refs #4) |
+| `[Flickr] YYYY-MM-DD …` | カメラ→Flickr パイプラインの撮影日別 (20 日窓) 登録/アップロードと残数・消化位置 | [ippoan/cf-flickr-cam-worker](https://github.com/ippoan/cf-flickr-cam-worker) `ReportEntrypoint.dailyStats()` RPC (Refs #18) |
 
-2 通は独立の try/catch で送る — 片方の失敗で他方を巻き込まない。
+2 通は独立の try/catch で送る — 片方の失敗で他方を巻き込まない。flickr 側は
+**集計の取得に失敗しても `[Flickr] … 取得失敗 ⚠️` を 1 通送る** (握り潰して無音で
+止まると気付けない、Refs #18)。
+
+供給元は 2026-07-08 まで `ippoan/rust-flickr` (Cloud Run) の `GET /stats` だったが、
+パイプラインが cf-flickr-cam-worker へ移行し Cloud Run が廃止されたため RPC に
+付け替えた。新パイプラインには verify 相当の工程が無いため、旧レポートにあった
+**「検証済」列と「未検証残」は無い**。
 
 ## 手動実行
 
@@ -34,7 +41,7 @@ await env.CF_BILLING_MONITOR.triggerFlickrReport();
 | path | 役割 |
 |---|---|
 | `src/index.ts` | scheduled / fetch handler、billing レポート本体 (`runReport`) |
-| `src/flickr-report.ts` | flickr レポート (`/stats` fetch → HTML → mimetext) |
+| `src/flickr-report.ts` | flickr レポート (cam worker RPC → HTML → mimetext、失敗時メールも) |
 | `src/email.ts` | billing メールの HTML 組み立て |
 | `src/graphql.ts` / `src/billing.ts` / `src/supabase.ts` | 各種メトリクス取得 |
 | `src/pricing.ts` / `src/storage.ts` | 料金計算 / KV 履歴 (前日比・月累計) |
@@ -44,7 +51,8 @@ await env.CF_BILLING_MONITOR.triggerFlickrReport();
 - `EMAIL` — `send_email` (destination は Email Routing で verify 済みであること)
 - `CF_API_TOKEN` / `SUPABASE_PAT` — CF Secrets Store
 - `BILLING_HISTORY` — KV (日次スナップショット)
-- `CF_ACCOUNT_ID` / `RUST_FLICKR_URL` / `FLICKR_REPORT_ORG` — plain vars
+- `CF_ACCOUNT_ID` — plain vars
+- `FLICKR_CAM` — service binding (`cf-flickr-cam-worker`, entrypoint `ReportEntrypoint`)
 
 ## デプロイ
 
