@@ -4,6 +4,7 @@ import type { Comparison, MonthToDateUsage } from "./storage";
 import type { WorkerMetrics, AccountUsageSummary } from "./graphql";
 import type { BillingEntry } from "./billing";
 import type { SupabaseUsage } from "./supabase";
+import { OBS_FREE_INGEST_GB, OBS_FREE_STORAGE_GB_MONTH, type ObservabilityUsage } from "./observability";
 
 interface EmailData {
   date: string;
@@ -14,6 +15,7 @@ interface EmailData {
   billingPeriodUsage: AccountUsageSummary;
   billingHistory: BillingEntry[];
   supabaseUsage: SupabaseUsage | null;
+  observabilityUsage: ObservabilityUsage;
 }
 
 function fmt(n: number): string {
@@ -84,8 +86,24 @@ function progressBar(used: number, free: number, label: string, valueStr: string
 </tr>`;
 }
 
+function buildObservabilitySection(u: ObservabilityUsage): string {
+  let html = `<div ${S.section}>Observability（ログ・トレース、請求期間）</div>`;
+  if (!u.found) {
+    const reason = u.error
+      ? `取得失敗: ${u.error}`
+      : "Billable Usage API に Observability の行がまだありません（2026-12-01 の GB 課金開始以降に出る見込み）";
+    return html + `<p style="margin:4px 0 0 10px;font-size:12px;color:#999">${reason}。ダッシュボードの Observability &gt; Usage で確認してください。</p>`;
+  }
+  html += `<table style="width:100%;border-collapse:collapse;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px">
+${progressBar(u.ingestedGB, OBS_FREE_INGEST_GB, "取り込み", `${u.ingestedGB.toFixed(2)} GB / ${OBS_FREE_INGEST_GB} GB`)}
+${progressBar(u.storedGBMonth, OBS_FREE_STORAGE_GB_MONTH, "保存", `${u.storedGBMonth.toFixed(2)} GB-mo / ${OBS_FREE_STORAGE_GB_MONTH} GB-mo`)}
+</table>
+<p style="margin:4px 0 0 10px;font-size:12px;color:#666">直近日 (${u.lastDay ?? "-"}) の取り込み: <strong>${u.lastDayIngestedGB.toFixed(2)} GB</strong> | 推定コスト: ${costCell(u.cost)}</p>`;
+  return html;
+}
+
 function buildHtmlBody(data: EmailData): string {
-  const { date, workerMetrics, comparison, monthToDate, monthToDateUsage, billingPeriodUsage, billingHistory, supabaseUsage } = data;
+  const { date, workerMetrics, comparison, monthToDate, monthToDateUsage, billingPeriodUsage, billingHistory, supabaseUsage, observabilityUsage } = data;
   const { current, changes, alerts } = comparison;
 
   const sorted = [...workerMetrics].sort((a, b) => b.requests - a.requests);
@@ -116,6 +134,9 @@ ${progressBar(mu.doRequests, FREE_DO_REQUESTS, "DO Req", `${fmtCompact(mu.doRequ
 ${progressBar(mu.queuesOps, FREE_QUEUES_OPS, "Queues Ops", `${fmtCompact(mu.queuesOps)} / ${fmtCompact(FREE_QUEUES_OPS)}`)}
 ${supabaseUsage ? progressBar(supabaseUsage.dbSizeMB, supabaseUsage.dbLimitMB, "Supabase DB", `${supabaseUsage.dbSizeMB.toFixed(0)} MB / ${(supabaseUsage.dbLimitMB / 1024).toFixed(0)} GB`) : ""}
 </table>`;
+
+  // --- Observability (Workers Logs / Traces、2026-12-01 から GB 課金) ---
+  html += buildObservabilitySection(observabilityUsage);
 
   // --- Workers テーブル ---
   html += `<div ${S.section}>Workers</div>
