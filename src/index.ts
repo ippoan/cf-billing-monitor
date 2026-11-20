@@ -4,7 +4,7 @@ import { EmailMessage } from "cloudflare:email";
 import { fetchWorkersMetrics, fetchR2Metrics, fetchDOMetrics, fetchContainersMetrics, fetchQueuesMetrics, fetchAccountUsageSummary } from "./graphql";
 import { fetchBillingHistory } from "./billing";
 import { fetchSupabaseUsage } from "./supabase";
-import { fetchObservabilityUsage, observabilityAlerts } from "./observability";
+import { fetchObservabilityUsage, observabilityAlerts, probeBillableUsageV2 } from "./observability";
 import {
   calculateWorkersCost,
   calculateR2Cost,
@@ -154,7 +154,7 @@ async function runReport(env: Env): Promise<void> {
   const supabasePat = await env.SUPABASE_PAT.get();
 
   // 並列でデータ取得
-  const [workerMetrics, r2Metrics, doMetrics, containersMetrics, queuesMetrics, billingHistory, billingPeriodUsage, supabaseUsage, observabilityUsage] = await Promise.all([
+  const [workerMetrics, r2Metrics, doMetrics, containersMetrics, queuesMetrics, billingHistory, billingPeriodUsage, supabaseUsage, observabilityUsage, observabilityV2] = await Promise.all([
     fetchWorkersMetrics(cfApiToken, env.CF_ACCOUNT_ID, startDateTime, endDateTime),
     fetchR2Metrics(cfApiToken, env.CF_ACCOUNT_ID, startDate, endDate),
     fetchDOMetrics(cfApiToken, env.CF_ACCOUNT_ID, startDateTime, endDateTime),
@@ -165,6 +165,8 @@ async function runReport(env: Env): Promise<void> {
     fetchSupabaseUsage(supabasePat),
     // throw しない (失敗は error / found=false で返り、メールに注記される)
     fetchObservabilityUsage(cfApiToken, env.CF_ACCOUNT_ID),
+    // v2 で GB / GB-month 行が取れるかの確認用 (一時、throw しない)
+    probeBillableUsageV2(cfApiToken, env.CF_ACCOUNT_ID),
   ]);
 
   // Workers 集計
@@ -261,6 +263,7 @@ async function runReport(env: Env): Promise<void> {
     billingHistory,
     supabaseUsage,
     observabilityUsage,
+    observabilityV2,
   });
 
   console.log(`Sending email: ${subject}`);

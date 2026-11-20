@@ -239,3 +239,58 @@ export function observabilityAlerts(u: ObservabilityUsage): string[] {
   }
   return alerts;
 }
+
+// --- v2 (/billable/usage, Alpha, Restricted) の確認用プローブ (一時) ---
+// v1 に Observability の GB / GB-month 行が無いため、v2 で取れるかを見る。
+// 結果はメールの確認用一覧に出すだけで、集計値には使わない。
+
+export interface V2Probe {
+  /** HTTP ステータス、または通信失敗時のメッセージ */
+  status: number | string;
+  /** 全行数 */
+  totalRows: number;
+  /** Observability 関連の行 (v1 と同じ束ね方) */
+  debugRows: DebugRow[];
+  /** エラー本文の先頭 (権限エラーなどの確認用) */
+  errorBody?: string;
+}
+
+interface V2Record {
+  ChargeDescription?: string;
+  ChargePeriodStart?: string;
+  ConsumedQuantity?: number;
+  ConsumedUnit?: string;
+  ContractedCost?: number;
+  x_BillableMetricName?: string;
+  x_ProductCategoryName?: string;
+  x_ProductFamilyName?: string;
+}
+
+export async function probeBillableUsageV2(token: string, accountId: string): Promise<V2Probe> {
+  try {
+    const resp = await fetch(`${API_BASE}/accounts/${accountId}/billable/usage`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!resp.ok) {
+      const body = (await resp.text()).slice(0, 300);
+      console.error(`Billable Usage API v2 error: ${resp.status} ${body}`);
+      return { status: resp.status, totalRows: 0, debugRows: [], errorBody: body };
+    }
+    const data = (await resp.json()) as { result?: V2Record[] };
+    const records = data.result ?? [];
+    // v1 の形に寄せて同じ判定・束ね方を使う (ServiceName は v2 に無いので metric 名で代用)
+    const mapped: UsageRecord[] = records.map((r) => ({
+      ServiceName: r.x_BillableMetricName ?? r.x_ProductFamilyName ?? "",
+      ServiceFamilyName: [r.x_ProductFamilyName, r.x_ProductCategoryName].filter(Boolean).join(" "),
+      ChargeDescription: r.ChargeDescription,
+      ChargePeriodStart: r.ChargePeriodStart,
+      ConsumedQuantity: r.ConsumedQuantity,
+      ConsumedUnit: r.ConsumedUnit,
+      ContractedCost: r.ContractedCost,
+    }));
+    return { status: resp.status, totalRows: records.length, debugRows: summarizeObservability(mapped).debugRows };
+  } catch (err) {
+    console.error("Billable Usage API v2 probe failed:", err);
+    return { status: err instanceof Error ? err.message : String(err), totalRows: 0, debugRows: [] };
+  }
+}
