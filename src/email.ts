@@ -92,14 +92,33 @@ function buildObservabilitySection(u: ObservabilityUsage): string {
     const reason = u.error
       ? `取得失敗: ${u.error}`
       : "Billable Usage API に Observability の行がまだありません（2026-12-01 の GB 課金開始以降に出る見込み）";
-    return html + `<p style="margin:4px 0 0 10px;font-size:12px;color:#999">${reason}。ダッシュボードの Observability &gt; Usage で確認してください。</p>`;
+    return html + `<p style="margin:4px 0 0 10px;font-size:12px;color:#999">${reason}。ダッシュボードの Observability &gt; Usage で確認してください。</p>` + buildObservabilityDebug(u);
   }
   html += `<table style="width:100%;border-collapse:collapse;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px">
 ${progressBar(u.ingestedGB, OBS_FREE_INGEST_GB, "取り込み", `${u.ingestedGB.toFixed(2)} GB / ${OBS_FREE_INGEST_GB} GB`)}
 ${progressBar(u.storedGBMonth, OBS_FREE_STORAGE_GB_MONTH, "保存", `${u.storedGBMonth.toFixed(2)} GB-mo / ${OBS_FREE_STORAGE_GB_MONTH} GB-mo`)}
 </table>
 <p style="margin:4px 0 0 10px;font-size:12px;color:#666">直近日 (${u.lastDay ?? "-"}) の取り込み: <strong>${u.lastDayIngestedGB.toFixed(2)} GB</strong> | 推定コスト: ${costCell(u.cost)}</p>`;
-  return html;
+  return html + buildObservabilityDebug(u);
+}
+
+function esc(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// 判定調整用 (一時): Billable Usage API の全行を束ねて出す。Observability 行の
+// ServiceName / 単位が確定したら消す。
+function buildObservabilityDebug(u: ObservabilityUsage): string {
+  if (u.debugRows.length === 0) return "";
+  const td = 'style="padding:2px 6px;border-bottom:1px solid #f0f0f0;white-space:nowrap"';
+  const tdR = 'style="padding:2px 6px;border-bottom:1px solid #f0f0f0;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums"';
+  let html = `<div style="margin:8px 0 0 10px;font-size:11px;color:#888">Billable Usage API の行（判定確認用・一時表示）
+<table style="border-collapse:collapse;font-size:11px;color:#666;margin-top:2px">
+<tr><th ${td}>判定</th><th ${td}>ServiceName</th><th ${td}>ChargeDescription</th><th ${td}>単位</th><th ${tdR}>合計量</th><th ${tdR}>日数</th><th ${td}>期間</th></tr>`;
+  for (const r of u.debugRows) {
+    html += `<tr><td ${td}>${r.kind}</td><td ${td}>${esc(r.service)}</td><td ${td}>${esc(r.description)}</td><td ${td}>${esc(r.unit)}</td><td ${tdR}>${r.quantity.toPrecision(4)}</td><td ${tdR}>${r.days}</td><td ${td}>${r.firstDay}〜${r.lastDay}</td></tr>`;
+  }
+  return html + `</table></div>`;
 }
 
 function buildHtmlBody(data: EmailData): string {
