@@ -4,7 +4,7 @@ import type { Comparison, MonthToDateUsage } from "./storage";
 import type { WorkerMetrics, AccountUsageSummary } from "./graphql";
 import type { BillingEntry } from "./billing";
 import type { SupabaseUsage } from "./supabase";
-import { OBS_FREE_INGEST_GB, OBS_FREE_STORAGE_GB_MONTH, type ObservabilityUsage } from "./observability";
+import { OBS_EST_EVENT_KB, OBS_FREE_EVENTS_MILLIONS, OBS_FREE_INGEST_GB, OBS_FREE_STORAGE_GB_MONTH, type ObservabilityUsage } from "./observability";
 
 interface EmailData {
   date: string;
@@ -94,11 +94,18 @@ function buildObservabilitySection(u: ObservabilityUsage): string {
       : "Billable Usage API に Observability の行がまだありません（2026-12-01 の GB 課金開始以降に出る見込み）";
     return html + `<p style="margin:4px 0 0 10px;font-size:12px;color:#999">${reason}。ダッシュボードの Observability &gt; Usage で確認してください。</p>` + buildObservabilityDebug(u);
   }
+  const est = u.source === "events";
+  const ingestLabel = est ? "取り込み(推定)" : "取り込み";
   html += `<table style="width:100%;border-collapse:collapse;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px">
-${progressBar(u.ingestedGB, OBS_FREE_INGEST_GB, "取り込み", `${u.ingestedGB.toFixed(2)} GB / ${OBS_FREE_INGEST_GB} GB`)}
-${progressBar(u.storedGBMonth, OBS_FREE_STORAGE_GB_MONTH, "保存", `${u.storedGBMonth.toFixed(2)} GB-mo / ${OBS_FREE_STORAGE_GB_MONTH} GB-mo`)}
+${progressBar(u.ingestedGB, OBS_FREE_INGEST_GB, ingestLabel, `${u.ingestedGB.toFixed(2)} GB / ${OBS_FREE_INGEST_GB} GB`)}
+${est
+    ? progressBar(u.eventsMillions, OBS_FREE_EVENTS_MILLIONS, "イベント数", `${u.eventsMillions.toFixed(2)}M / ${OBS_FREE_EVENTS_MILLIONS}M`)
+    : progressBar(u.storedGBMonth, OBS_FREE_STORAGE_GB_MONTH, "保存", `${u.storedGBMonth.toFixed(2)} GB-mo / ${OBS_FREE_STORAGE_GB_MONTH} GB-mo`)}
 </table>
-<p style="margin:4px 0 0 10px;font-size:12px;color:#666">直近日 (${u.lastDay ?? "-"}) の取り込み: <strong>${u.lastDayIngestedGB.toFixed(2)} GB</strong> | 推定コスト: ${costCell(u.cost)}</p>`;
+<p style="margin:4px 0 0 10px;font-size:12px;color:#666">直近日 (${u.lastDay ?? "-"}) の取り込み: <strong>${u.lastDayIngestedGB.toFixed(2)} GB${est ? `（推定、${(u.lastDayEventsMillions * 1e6).toLocaleString("en-US", { maximumFractionDigits: 0 })} 件）` : ""}</strong> | 推定コスト: ${costCell(u.cost)}</p>`;
+  if (est) {
+    html += `<p style="margin:2px 0 0 10px;font-size:11px;color:#999">API はまだ旧課金（イベント数）の行のみ。GB はイベント数 × ${OBS_EST_EVENT_KB} KB の推定。保存量 (GB-month) は API 未提供のため非表示（12/1 の GB 課金開始後に実測値へ自動で切り替え）。</p>`;
+  }
   return html + buildObservabilityDebug(u);
 }
 
@@ -106,13 +113,13 @@ function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// 判定調整用 (一時): Billable Usage API の全行を束ねて出す。Observability 行の
-// ServiceName / 単位が確定したら消す。
+// 判定調整用 (一時): Observability らしい行だけを束ねて出す。12/1 以降の
+// GB 課金の行の ServiceName / 単位が確定したら消す。
 function buildObservabilityDebug(u: ObservabilityUsage): string {
   if (u.debugRows.length === 0) return "";
   const td = 'style="padding:2px 6px;border-bottom:1px solid #f0f0f0;white-space:nowrap"';
   const tdR = 'style="padding:2px 6px;border-bottom:1px solid #f0f0f0;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums"';
-  let html = `<div style="margin:8px 0 0 10px;font-size:11px;color:#888">Billable Usage API の行（判定確認用・一時表示）
+  let html = `<div style="margin:8px 0 0 10px;font-size:11px;color:#888">Billable Usage API の Observability 関連行（判定確認用・一時表示）
 <table style="border-collapse:collapse;font-size:11px;color:#666;margin-top:2px">
 <tr><th ${td}>判定</th><th ${td}>ServiceName</th><th ${td}>ChargeDescription</th><th ${td}>単位</th><th ${tdR}>合計量</th><th ${tdR}>日数</th><th ${td}>期間</th></tr>`;
   for (const r of u.debugRows) {
