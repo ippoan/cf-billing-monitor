@@ -4,7 +4,7 @@ import type { Comparison, MonthToDateUsage } from "./storage";
 import type { WorkerMetrics, AccountUsageSummary } from "./graphql";
 import type { BillingEntry } from "./billing";
 import type { SupabaseUsage } from "./supabase";
-import { OBS_EST_EVENT_KB, OBS_FREE_EVENTS_MILLIONS, OBS_FREE_INGEST_GB, OBS_FREE_STORAGE_GB_MONTH, type ObservabilityUsage } from "./observability";
+import { OBS_EST_EVENT_KB, OBS_FREE_EVENTS_MILLIONS, OBS_FREE_INGEST_GB, OBS_FREE_STORAGE_GB_MONTH, type ObservabilityUsage, type V2Probe, type DebugRow } from "./observability";
 
 interface EmailData {
   date: string;
@@ -16,6 +16,7 @@ interface EmailData {
   billingHistory: BillingEntry[];
   supabaseUsage: SupabaseUsage | null;
   observabilityUsage: ObservabilityUsage;
+  observabilityV2: V2Probe;
 }
 
 function fmt(n: number): string {
@@ -117,19 +118,30 @@ function esc(s: string): string {
 // GB 課金の行の ServiceName / 単位が確定したら消す。
 function buildObservabilityDebug(u: ObservabilityUsage): string {
   if (u.debugRows.length === 0) return "";
+  return `<div style="margin:8px 0 0 10px;font-size:11px;color:#888">Billable Usage API (v1) の Observability 関連行（判定確認用・一時表示）${debugTable(u.debugRows)}</div>`;
+}
+
+function debugTable(rows: DebugRow[]): string {
   const td = 'style="padding:2px 6px;border-bottom:1px solid #f0f0f0;white-space:nowrap"';
   const tdR = 'style="padding:2px 6px;border-bottom:1px solid #f0f0f0;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums"';
-  let html = `<div style="margin:8px 0 0 10px;font-size:11px;color:#888">Billable Usage API の Observability 関連行（判定確認用・一時表示）
-<table style="border-collapse:collapse;font-size:11px;color:#666;margin-top:2px">
+  let html = `<table style="border-collapse:collapse;font-size:11px;color:#666;margin-top:2px">
 <tr><th ${td}>判定</th><th ${td}>ServiceName</th><th ${td}>ChargeDescription</th><th ${td}>単位</th><th ${tdR}>合計量</th><th ${tdR}>日数</th><th ${td}>期間</th></tr>`;
-  for (const r of u.debugRows) {
+  for (const r of rows) {
     html += `<tr><td ${td}>${r.kind}</td><td ${td}>${esc(r.service)}</td><td ${td}>${esc(r.description)}</td><td ${td}>${esc(r.unit)}</td><td ${tdR}>${r.quantity.toPrecision(4)}</td><td ${tdR}>${r.days}</td><td ${td}>${r.firstDay}〜${r.lastDay}</td></tr>`;
   }
-  return html + `</table></div>`;
+  return html + `</table>`;
+}
+
+// v2 (/billable/usage) の確認用 (一時)。GB / GB-month 行が v2 にあるかを見る。
+function buildV2ProbeSection(p: V2Probe): string {
+  let html = `<div style="margin:8px 0 0 10px;font-size:11px;color:#888">Billable Usage API v2 (/billable/usage) 確認: HTTP ${esc(String(p.status))} / 全 ${p.totalRows} 行 / Observability 関連 ${p.debugRows.length} 行`;
+  if (p.errorBody) html += `<br><code style="font-size:10px">${esc(p.errorBody)}</code>`;
+  if (p.debugRows.length > 0) html += debugTable(p.debugRows);
+  return html + `</div>`;
 }
 
 function buildHtmlBody(data: EmailData): string {
-  const { date, workerMetrics, comparison, monthToDate, monthToDateUsage, billingPeriodUsage, billingHistory, supabaseUsage, observabilityUsage } = data;
+  const { date, workerMetrics, comparison, monthToDate, monthToDateUsage, billingPeriodUsage, billingHistory, supabaseUsage, observabilityUsage, observabilityV2 } = data;
   const { current, changes, alerts } = comparison;
 
   const sorted = [...workerMetrics].sort((a, b) => b.requests - a.requests);
@@ -163,6 +175,7 @@ ${supabaseUsage ? progressBar(supabaseUsage.dbSizeMB, supabaseUsage.dbLimitMB, "
 
   // --- Observability (Workers Logs / Traces、2026-12-01 から GB 課金) ---
   html += buildObservabilitySection(observabilityUsage);
+  html += buildV2ProbeSection(observabilityV2);
 
   // --- Workers テーブル ---
   html += `<div ${S.section}>Workers</div>
