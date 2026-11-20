@@ -8,7 +8,7 @@
 
 | 件名 | 内容 | ソース |
 |---|---|---|
-| `[CF Billing] YYYY-MM-DD 使用量レポート` | Workers / R2 / DO / Containers / Supabase の使用量・概算コスト・前日比・月累計 | CF GraphQL Analytics + Billing API + Supabase API |
+| `[CF Billing] YYYY-MM-DD 使用量レポート` | Workers / R2 / DO / Containers / Supabase の使用量・概算コスト・前日比・月累計、Observability (ログ・トレース) の取り込み GB / 保存 GB-month | CF GraphQL Analytics + Billing API + Billable Usage API + Supabase API |
 | `[Flickr] YYYY-MM-DD …` | カメラ→Flickr パイプラインの撮影日別 (20 日窓) 登録/アップロードと残数・消化位置 | [ippoan/cf-flickr-cam-worker](https://github.com/ippoan/cf-flickr-cam-worker) `ReportEntrypoint.dailyStats()` RPC (Refs #18) |
 
 2 通は独立の try/catch で送る — 片方の失敗で他方を巻き込まない。flickr 側は
@@ -44,6 +44,7 @@ await env.CF_BILLING_MONITOR.triggerFlickrReport();
 | `src/flickr-report.ts` | flickr レポート (cam worker RPC → HTML → mimetext、失敗時メールも) |
 | `src/email.ts` | billing メールの HTML 組み立て |
 | `src/graphql.ts` / `src/billing.ts` / `src/supabase.ts` | 各種メトリクス取得 |
+| `src/observability.ts` | Observability 使用量 (Billable Usage API、2026-12-01 からの GB 課金に対応。無料枠 50 GB / 10 GB-month、1 GB/日 超でアラート) |
 | `src/pricing.ts` / `src/storage.ts` | 料金計算 / KV 履歴 (前日比・月累計) |
 
 ## bindings / vars (wrangler.toml)

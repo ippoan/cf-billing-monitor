@@ -4,6 +4,7 @@ import { EmailMessage } from "cloudflare:email";
 import { fetchWorkersMetrics, fetchR2Metrics, fetchDOMetrics, fetchContainersMetrics, fetchQueuesMetrics, fetchAccountUsageSummary } from "./graphql";
 import { fetchBillingHistory } from "./billing";
 import { fetchSupabaseUsage } from "./supabase";
+import { fetchObservabilityUsage, observabilityAlerts } from "./observability";
 import {
   calculateWorkersCost,
   calculateR2Cost,
@@ -153,7 +154,7 @@ async function runReport(env: Env): Promise<void> {
   const supabasePat = await env.SUPABASE_PAT.get();
 
   // 並列でデータ取得
-  const [workerMetrics, r2Metrics, doMetrics, containersMetrics, queuesMetrics, billingHistory, billingPeriodUsage, supabaseUsage] = await Promise.all([
+  const [workerMetrics, r2Metrics, doMetrics, containersMetrics, queuesMetrics, billingHistory, billingPeriodUsage, supabaseUsage, observabilityUsage] = await Promise.all([
     fetchWorkersMetrics(cfApiToken, env.CF_ACCOUNT_ID, startDateTime, endDateTime),
     fetchR2Metrics(cfApiToken, env.CF_ACCOUNT_ID, startDate, endDate),
     fetchDOMetrics(cfApiToken, env.CF_ACCOUNT_ID, startDateTime, endDateTime),
@@ -162,6 +163,8 @@ async function runReport(env: Env): Promise<void> {
     fetchBillingHistory(cfApiToken, env.CF_ACCOUNT_ID),
     fetchAccountUsageSummary(cfApiToken, env.CF_ACCOUNT_ID, billingStartDate, endDateTime),
     fetchSupabaseUsage(supabasePat),
+    // throw しない (失敗は error / found=false で返り、メールに注記される)
+    fetchObservabilityUsage(cfApiToken, env.CF_ACCOUNT_ID),
   ]);
 
   // Workers 集計
@@ -239,6 +242,7 @@ async function runReport(env: Env): Promise<void> {
   const previous = await getPrevious(env.BILLING_HISTORY, dateStr);
   await saveDaily(env.BILLING_HISTORY, dailyUsage);
   const comparison = compare(dailyUsage, previous);
+  comparison.alerts.push(...observabilityAlerts(observabilityUsage));
 
   // 月初から今日までの累計
   const [monthToDate, monthToDateUsage] = await Promise.all([
@@ -256,6 +260,7 @@ async function runReport(env: Env): Promise<void> {
     billingPeriodUsage,
     billingHistory,
     supabaseUsage,
+    observabilityUsage,
   });
 
   console.log(`Sending email: ${subject}`);
